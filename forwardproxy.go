@@ -143,7 +143,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 			if length != 0 {
 				traffic, _ = strconv.ParseInt(string(buf[0:length]), 10, 64)
 			}
-			_ = os.WriteFile(file.Name(), []byte(strconv.FormatInt(traffic+10, 10)), 0755)
+			_ = os.WriteFile(file.Name(), []byte(strconv.FormatInt(traffic+ud.traffic, 10)), 0755)
 			_ = file.Close()
 		}
 	}()
