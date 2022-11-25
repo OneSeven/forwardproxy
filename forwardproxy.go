@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -336,7 +337,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			fallthrough
 		case 3:
 			defer r.Body.Close()
-			return dualStream(targetConn, r.Body, w, r.Header.Get("Padding") != "")
+			return dualStream(h, targetConn, r.Body, w, r.Header.Get("Padding") != "")
 		}
 
 		panic("There was a check for http version, yet it's incorrect")
@@ -616,7 +617,7 @@ func serveHijack(w http.ResponseWriter, targetConn net.Conn) error {
 			fmt.Errorf("failed to send response to client: %v", err))
 	}
 
-	return dualStream(targetConn, clientConn, clientConn, false)
+	return dualStream(nil, targetConn, clientConn, clientConn, false)
 }
 
 const (
@@ -629,13 +630,18 @@ const (
 // Copies data target->clientReader and clientWriter->target, and flushes as needed
 // Returns when clientWriter-> target stream is done.
 // Caddy should finish writing target -> clientReader.
-func dualStream(target net.Conn, clientReader io.ReadCloser, clientWriter io.Writer, padding bool) error {
+func dualStream(h *Handler, target net.Conn, clientReader io.ReadCloser, clientWriter io.Writer, padding bool) error {
 	stream := func(w io.Writer, r io.Reader, paddingType int) error {
 		// copy bytes from r to w
 		buf := bufferPool.Get().([]byte)
 		buf = buf[0:cap(buf)]
-		_, _err := flushingIoCopy(w, r, buf, paddingType)
+		written, _err := flushingIoCopy(w, r, buf, paddingType)
 		bufferPool.Put(buf)
+		if h != nil {
+			go func() {
+				trafficStatisticsChannel <- userData{userName: h.BasicauthUser, traffic: written}
+			}()
+		}
 		if cw, ok := w.(closeWriter); ok {
 			cw.CloseWrite()
 		}
@@ -813,3 +819,39 @@ var (
 	_ caddyhttp.MiddlewareHandler = (*Handler)(nil)
 	_ caddyfile.Unmarshaler       = (*Handler)(nil)
 )
+
+type userData struct {
+	userName string
+	traffic  int64
+}
+
+var trafficStatisticsChannel = make(chan userData, 100)
+
+func trafficStatistics() {
+	executable, err := os.Executable()
+	if err != nil {
+		return
+	}
+	path := filepath.Dir(executable)
+	dir := path + "/traffic"
+	_, err = os.Stat(dir)
+	if err != nil && os.IsNotExist(err) {
+		if err = os.MkdirAll(dir, 0755); err != nil {
+			return
+		}
+	}
+	for ud := range trafficStatisticsChannel {
+		file, err := os.OpenFile(dir+"/"+ud.userName, os.O_RDWR|os.O_CREATE, 0755)
+		if err != nil {
+			continue
+		}
+		buf := make([]byte, 4096)
+		length, _ := file.Read(buf)
+		var traffic int64 = 0
+		if length != 0 {
+			traffic, _ = strconv.ParseInt(string(buf[0:length]), 10, 64)
+		}
+		_ = os.WriteFile(file.Name(), []byte(strconv.FormatInt(traffic+10, 10)), 0755)
+		_ = file.Close()
+	}
+}
