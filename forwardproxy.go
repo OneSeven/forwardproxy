@@ -52,7 +52,6 @@ func init() {
 	// Used for generating padding lengths. Not needed to be cryptographically secure.
 	// Does not care about double seeding.
 	rand.Seed(time.Now().UnixNano())
-	go trafficStatistics()
 }
 
 // Handler implements a forward proxy.
@@ -102,6 +101,8 @@ type Handler struct {
 	BasicauthPass   string `json:"auth_pass_deprecated,omitempty"`
 	authRequired    bool
 	authCredentials [][]byte // slice with base64-encoded credentials
+
+	trafficStatisticsChannel chan userData
 }
 
 // CaddyModule returns the Caddy module information.
@@ -115,7 +116,35 @@ func (Handler) CaddyModule() caddy.ModuleInfo {
 // Provision ensures that h is set up properly before use.
 func (h *Handler) Provision(ctx caddy.Context) error {
 	h.logger = ctx.Logger(h)
-
+	h.trafficStatisticsChannel = make(chan userData, 100)
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	path := filepath.Dir(executable)
+	dir := path + "/traffic"
+	_, err = os.Stat(dir)
+	if err != nil && os.IsNotExist(err) {
+		if err = os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
+	go func() {
+		for ud := range h.trafficStatisticsChannel {
+			file, err := os.OpenFile(dir+"/"+ud.userName, os.O_RDWR|os.O_CREATE, 0755)
+			if err != nil {
+				continue
+			}
+			buf := make([]byte, 4096)
+			length, _ := file.Read(buf)
+			var traffic int64 = 0
+			if length != 0 {
+				traffic, _ = strconv.ParseInt(string(buf[0:length]), 10, 64)
+			}
+			_ = os.WriteFile(file.Name(), []byte(strconv.FormatInt(traffic+10, 10)), 0755)
+			_ = file.Close()
+		}
+	}()
 	if h.DialTimeout <= 0 {
 		h.DialTimeout = caddy.Duration(30 * time.Second)
 	}
@@ -640,7 +669,7 @@ func dualStream(h *Handler, target net.Conn, clientReader io.ReadCloser, clientW
 		bufferPool.Put(buf)
 		if h != nil {
 			go func() {
-				trafficStatisticsChannel <- userData{userName: h.BasicauthUser, traffic: written}
+				h.trafficStatisticsChannel <- userData{userName: h.BasicauthUser, traffic: written}
 			}()
 		}
 		if cw, ok := w.(closeWriter); ok {
@@ -824,35 +853,4 @@ var (
 type userData struct {
 	userName string
 	traffic  int64
-}
-
-var trafficStatisticsChannel = make(chan userData, 100)
-
-func trafficStatistics() {
-	executable, err := os.Executable()
-	if err != nil {
-		return
-	}
-	path := filepath.Dir(executable)
-	dir := path + "/traffic"
-	_, err = os.Stat(dir)
-	if err != nil && os.IsNotExist(err) {
-		if err = os.MkdirAll(dir, 0755); err != nil {
-			return
-		}
-	}
-	for ud := range trafficStatisticsChannel {
-		file, err := os.OpenFile(dir+"/"+ud.userName, os.O_RDWR|os.O_CREATE, 0755)
-		if err != nil {
-			continue
-		}
-		buf := make([]byte, 4096)
-		length, _ := file.Read(buf)
-		var traffic int64 = 0
-		if length != 0 {
-			traffic, _ = strconv.ParseInt(string(buf[0:length]), 10, 64)
-		}
-		_ = os.WriteFile(file.Name(), []byte(strconv.FormatInt(traffic+10, 10)), 0755)
-		_ = file.Close()
-	}
 }
