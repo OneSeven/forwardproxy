@@ -121,8 +121,10 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	if err != nil {
 		return err
 	}
+	h.logger.Info("executable:" + executable)
 	path := filepath.Dir(executable)
 	dir := path + "/traffic"
+	h.logger.Info("executable path:" + executable)
 	_, err = os.Stat(dir)
 	if err != nil && os.IsNotExist(err) {
 		if err = os.MkdirAll(dir, 0755); err != nil {
