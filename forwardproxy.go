@@ -669,7 +669,7 @@ func dualStream(h *Handler, target net.Conn, clientReader io.ReadCloser, clientW
 		buf = buf[0:cap(buf)]
 		written, _err := flushingIoCopy(w, r, buf, paddingType)
 		bufferPool.Put(buf)
-		if h != nil {
+		if h != nil && paddingType != RemovePadding {
 			go func() {
 				h.trafficStatisticsChannel <- userData{userName: h.BasicauthUser, traffic: written}
 			}()
