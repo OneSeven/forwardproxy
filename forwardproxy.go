@@ -52,6 +52,7 @@ func init() {
 	// Used for generating padding lengths. Not needed to be cryptographically secure.
 	// Does not care about double seeding.
 	rand.Seed(time.Now().UnixNano())
+	go trafficStatistics()
 }
 
 // Handler implements a forward proxy.
