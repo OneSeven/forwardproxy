@@ -23,8 +23,10 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/redis/go-redis/v9"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -100,6 +102,18 @@ type Handler struct {
 	BasicauthPass   string `json:"auth_pass_deprecated,omitempty"`
 	authRequired    bool
 	authCredentials [][]byte // slice with base64-encoded credentials
+
+	//AuthUser        []user `json:"auth_user,omitempty"`
+	userCredentials map[string]string
+
+	EnableStatistics bool
+
+	traffic chan userData
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	mutex sync.RWMutex
 }
 
 // CaddyModule returns the Caddy module information.
@@ -113,7 +127,7 @@ func (Handler) CaddyModule() caddy.ModuleInfo {
 // Provision ensures that h is set up properly before use.
 func (h *Handler) Provision(ctx caddy.Context) error {
 	h.logger = ctx.Logger(h)
-
+	h.loadUserData()
 	if h.DialTimeout <= 0 {
 		h.DialTimeout = caddy.Duration(30 * time.Second)
 	}
@@ -132,6 +146,17 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 		h.authRequired = true
 		h.authCredentials = [][]byte{basicAuthBuf}
 	}
+	h.authRequired = true
+	/*	if len(h.AuthUser) != 0 {
+		h.authRequired = true
+		h.userCredentials = make(map[string]string, len(h.AuthUser))
+		for _, v := range h.AuthUser {
+			basicAuthBuf := make([]byte, base64.StdEncoding.EncodedLen(len(v.Username)+1+len(v.Password)))
+			base64.StdEncoding.Encode(basicAuthBuf, []byte(v.Username+":"+v.Password))
+			h.authCredentials = append(h.authCredentials, basicAuthBuf)
+			h.userCredentials[string(basicAuthBuf)] = v.Username
+		}
+	}*/
 
 	// access control lists
 	for _, rule := range h.ACL {
@@ -242,8 +267,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	}
 
 	var authErr error
+	var user string
 	if h.authRequired {
-		authErr = h.checkCredentials(r)
+		user, authErr = h.checkCredentials(r)
 	}
 	if h.ProbeResistance != nil && len(h.ProbeResistance.Domain) > 0 && reqHost == h.ProbeResistance.Domain {
 		return serveHiddenPage(w, authErr)
@@ -265,7 +291,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		w.Header().Set("Proxy-Authenticate", "Basic realm=\"Caddy Secure Web Proxy\"")
 		return caddyhttp.Error(http.StatusProxyAuthRequired, authErr)
 	}
-
+	//h.UserData[user].Ip = netutil.GetRequestPublicIp(r)
 	if r.ProtoMajor != 1 && r.ProtoMajor != 2 && r.ProtoMajor != 3 {
 		return caddyhttp.Error(http.StatusHTTPVersionNotSupported,
 			fmt.Errorf("unsupported HTTP major version: %d", r.ProtoMajor))
@@ -336,7 +362,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			fallthrough
 		case 3:
 			defer r.Body.Close()
-			return dualStream(targetConn, r.Body, w, r.Header.Get("Padding") != "")
+			return dualStream(h, user, targetConn, r.Body, w, r.Header.Get("Padding") != "")
 		}
 
 		panic("There was a check for http version, yet it's incorrect")
@@ -430,23 +456,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	return forwardResponse(w, response)
 }
 
-func (h Handler) checkCredentials(r *http.Request) error {
+func (h *Handler) checkCredentials(r *http.Request) (user string, error error) {
 	pa := strings.Split(r.Header.Get("Proxy-Authorization"), " ")
 	if len(pa) != 2 {
-		return errors.New("Proxy-Authorization is required! Expected format: <type> <credentials>")
+		return "", errors.New("Proxy-Authorization is required! Expected format: <type> <credentials>")
 	}
 	if strings.ToLower(pa[0]) != "basic" {
-		return errors.New("Auth type is not supported")
+		return "", errors.New("Auth type is not supported")
 	}
+	h.mutex.RLock()
+	defer h.mutex.RUnlock()
 	for _, creds := range h.authCredentials {
 		if subtle.ConstantTimeCompare(creds, []byte(pa[1])) == 1 {
 			// Please do not consider this to be timing-attack-safe code. Simple equality is almost
 			// mindlessly substituted with constant time algo and there ARE known issues with this code,
 			// e.g. size of smallest credentials is guessable. TODO: protect from all the attacks! Hash?
-			return nil
+			return h.userCredentials[string(creds)], nil
 		}
 	}
-	return errors.New("Invalid credentials")
+	return "", errors.New("Invalid credentials")
 }
 
 func (h Handler) shouldServePACFile(r *http.Request) bool {
@@ -616,7 +644,7 @@ func serveHijack(w http.ResponseWriter, targetConn net.Conn) error {
 			fmt.Errorf("failed to send response to client: %v", err))
 	}
 
-	return dualStream(targetConn, clientConn, clientConn, false)
+	return dualStream(nil, "", targetConn, clientConn, clientConn, false)
 }
 
 const (
@@ -629,12 +657,19 @@ const (
 // Copies data target->clientReader and clientWriter->target, and flushes as needed
 // Returns when clientWriter-> target stream is done.
 // Caddy should finish writing target -> clientReader.
-func dualStream(target net.Conn, clientReader io.ReadCloser, clientWriter io.Writer, padding bool) error {
+func dualStream(h *Handler, user string, target net.Conn, clientReader io.ReadCloser, clientWriter io.Writer, padding bool) error {
 	stream := func(w io.Writer, r io.Reader, paddingType int) error {
 		// copy bytes from r to w
 		buf := bufferPool.Get().([]byte)
 		buf = buf[0:cap(buf)]
-		_, _err := flushingIoCopy(w, r, buf, paddingType)
+		written, _err := flushingIoCopy(w, r, buf, paddingType, h, user)
+		if h.EnableStatistics && rdb != nil {
+			//h.UserData[user].Traffic.Add(int64(nw))
+			/*ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+			rdb.ZIncrBy(ctx, "traffic", float64(nw), user)
+			cancel()*/
+			h.traffic <- userData{Username: user, Traffic: written}
+		}
 		bufferPool.Put(buf)
 		if cw, ok := w.(closeWriter); ok {
 			cw.CloseWrite()
@@ -657,7 +692,7 @@ type closeWriter interface {
 // flushingIoCopy is analogous to buffering io.Copy(), but also attempts to flush on each iteration.
 // If dst does not implement http.Flusher(e.g. net.TCPConn), it will do a simple io.CopyBuffer().
 // Reasoning: http2ResponseWriter will not flush on its own, so we have to do it manually.
-func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int) (written int64, err error) {
+func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int, h *Handler, user string) (written int64, err error) {
 	flusher, hasFlusher := dst.(http.Flusher)
 	var numPadding int
 	for {
@@ -813,3 +848,84 @@ var (
 	_ caddyhttp.MiddlewareHandler = (*Handler)(nil)
 	_ caddyfile.Unmarshaler       = (*Handler)(nil)
 )
+
+type userData struct {
+	Username string `json:"username"`
+	Traffic  int64  `json:"traffic"`
+	Ip       string `json:"ip"`
+}
+type user struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+var rdb *redis.Client
+
+func (h *Handler) loadUserData() {
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Error("loadUserData err:" + r.(error).Error())
+		}
+	}()
+	h.ctx, h.cancel = context.WithCancel(context.TODO())
+	h.EnableStatistics = true
+	h.traffic = make(chan userData, 100000)
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+	go h.SyncUser()
+	go h.trafficHandler()
+}
+
+func (h *Handler) Cleanup() error {
+	h.cancel()
+	_ = rdb.Close()
+	return nil
+}
+
+func (h *Handler) SyncUser() {
+	for {
+		result, err := rdb.BLPop(h.ctx, 0, "users").Result()
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			} else {
+				time.Sleep(time.Second * 10)
+			}
+		}
+		var authUser []user
+		if len(result) < 2 {
+			continue
+		}
+		err = json.Unmarshal([]byte(result[1]), &authUser)
+		if err != nil {
+			continue
+		}
+		h.mutex.Lock()
+		h.authRequired = true
+		h.userCredentials = make(map[string]string, len(authUser))
+		h.authCredentials = [][]byte{}
+		for _, v := range authUser {
+			basicAuthBuf := make([]byte, base64.StdEncoding.EncodedLen(len(v.Username)+1+len(v.Password)))
+			base64.StdEncoding.Encode(basicAuthBuf, []byte(v.Username+":"+v.Password))
+			h.authCredentials = append(h.authCredentials, basicAuthBuf)
+			h.userCredentials[string(basicAuthBuf)] = v.Username
+		}
+		h.mutex.Unlock()
+	}
+}
+
+func (h *Handler) trafficHandler() {
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+		case item := <-h.traffic:
+			ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+			rdb.ZIncrBy(ctx, "traffic", float64(item.Traffic), item.Username)
+			cancel()
+		}
+	}
+}
