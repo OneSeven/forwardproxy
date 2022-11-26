@@ -103,6 +103,8 @@ type Handler struct {
 	authCredentials [][]byte // slice with base64-encoded credentials
 
 	trafficStatisticsChannel chan userData
+
+	AuthUser map[string]string `json:"auth_user,omitempty"`
 }
 
 // CaddyModule returns the Caddy module information.
@@ -164,6 +166,15 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 		base64.StdEncoding.Encode(basicAuthBuf, []byte(h.BasicauthUser+":"+h.BasicauthPass))
 		h.authRequired = true
 		h.authCredentials = [][]byte{basicAuthBuf}
+	}
+
+	if len(h.AuthUser) != 0 {
+		h.authRequired = true
+		for user, pass := range h.AuthUser {
+			basicAuthBuf := make([]byte, base64.StdEncoding.EncodedLen(len(user)+1+len(pass)))
+			base64.StdEncoding.Encode(basicAuthBuf, []byte(user+":"+pass))
+			h.authCredentials = append(h.authCredentials, basicAuthBuf)
+		}
 	}
 
 	// access control lists
