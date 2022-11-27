@@ -171,6 +171,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 
 	if len(h.AuthUser) != 0 {
 		h.authRequired = true
+		h.userCredentials = make(map[string]string, len(h.AuthUser))
 		for user, pass := range h.AuthUser {
 			basicAuthBuf := make([]byte, base64.StdEncoding.EncodedLen(len(user)+1+len(pass)))
 			base64.StdEncoding.Encode(basicAuthBuf, []byte(user+":"+pass))
