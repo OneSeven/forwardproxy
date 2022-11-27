@@ -104,7 +104,8 @@ type Handler struct {
 
 	trafficStatisticsChannel chan userData
 
-	AuthUser map[string]string `json:"auth_user,omitempty"`
+	AuthUser        map[string]string `json:"auth_user,omitempty"`
+	userCredentials map[string]string
 }
 
 // CaddyModule returns the Caddy module information.
@@ -126,7 +127,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	h.logger.Info("executable:" + executable)
 	path := filepath.Dir(executable)
 	dir := path + "/traffic"
-	h.logger.Info("executable path:" + executable)
+	h.logger.Info("executable path:" + path)
 	_, err = os.Stat(dir)
 	if err != nil && os.IsNotExist(err) {
 		if err = os.MkdirAll(dir, 0755); err != nil {
@@ -174,6 +175,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 			basicAuthBuf := make([]byte, base64.StdEncoding.EncodedLen(len(user)+1+len(pass)))
 			base64.StdEncoding.Encode(basicAuthBuf, []byte(user+":"+pass))
 			h.authCredentials = append(h.authCredentials, basicAuthBuf)
+			h.userCredentials[string(basicAuthBuf)] = user
 		}
 	}
 
@@ -286,8 +288,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	}
 
 	var authErr error
+	var user string
 	if h.authRequired {
-		authErr = h.checkCredentials(r)
+		user, authErr = h.checkCredentials(r)
 	}
 	if h.ProbeResistance != nil && len(h.ProbeResistance.Domain) > 0 && reqHost == h.ProbeResistance.Domain {
 		return serveHiddenPage(w, authErr)
@@ -380,7 +383,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			fallthrough
 		case 3:
 			defer r.Body.Close()
-			return dualStream(h, targetConn, r.Body, w, r.Header.Get("Padding") != "")
+			return dualStream(h, user, targetConn, r.Body, w, r.Header.Get("Padding") != "")
 		}
 
 		panic("There was a check for http version, yet it's incorrect")
@@ -474,23 +477,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	return forwardResponse(w, response)
 }
 
-func (h Handler) checkCredentials(r *http.Request) error {
+func (h Handler) checkCredentials(r *http.Request) (user string, error error) {
 	pa := strings.Split(r.Header.Get("Proxy-Authorization"), " ")
 	if len(pa) != 2 {
-		return errors.New("Proxy-Authorization is required! Expected format: <type> <credentials>")
+		return "", errors.New("Proxy-Authorization is required! Expected format: <type> <credentials>")
 	}
 	if strings.ToLower(pa[0]) != "basic" {
-		return errors.New("Auth type is not supported")
+		return "", errors.New("Auth type is not supported")
 	}
 	for _, creds := range h.authCredentials {
 		if subtle.ConstantTimeCompare(creds, []byte(pa[1])) == 1 {
 			// Please do not consider this to be timing-attack-safe code. Simple equality is almost
 			// mindlessly substituted with constant time algo and there ARE known issues with this code,
 			// e.g. size of smallest credentials is guessable. TODO: protect from all the attacks! Hash?
-			return nil
+			return h.userCredentials[string(creds)], nil
 		}
 	}
-	return errors.New("Invalid credentials")
+	return "", errors.New("Invalid credentials")
 }
 
 func (h Handler) shouldServePACFile(r *http.Request) bool {
@@ -660,7 +663,7 @@ func serveHijack(w http.ResponseWriter, targetConn net.Conn) error {
 			fmt.Errorf("failed to send response to client: %v", err))
 	}
 
-	return dualStream(nil, targetConn, clientConn, clientConn, false)
+	return dualStream(nil, "", targetConn, clientConn, clientConn, false)
 }
 
 const (
@@ -673,16 +676,16 @@ const (
 // Copies data target->clientReader and clientWriter->target, and flushes as needed
 // Returns when clientWriter-> target stream is done.
 // Caddy should finish writing target -> clientReader.
-func dualStream(h *Handler, target net.Conn, clientReader io.ReadCloser, clientWriter io.Writer, padding bool) error {
+func dualStream(h *Handler, user string, target net.Conn, clientReader io.ReadCloser, clientWriter io.Writer, padding bool) error {
 	stream := func(w io.Writer, r io.Reader, paddingType int) error {
 		// copy bytes from r to w
 		buf := bufferPool.Get().([]byte)
 		buf = buf[0:cap(buf)]
 		written, _err := flushingIoCopy(w, r, buf, paddingType)
 		bufferPool.Put(buf)
-		if h != nil && paddingType != RemovePadding {
+		if user != "" && paddingType != RemovePadding {
 			go func() {
-				h.trafficStatisticsChannel <- userData{userName: h.BasicauthUser, traffic: written}
+				h.trafficStatisticsChannel <- userData{userName: user, traffic: written}
 			}()
 		}
 		if cw, ok := w.(closeWriter); ok {
