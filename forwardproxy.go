@@ -25,6 +25,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/bytedance/sonic"
+	"github.com/duke-git/lancet/v2/fileutil"
+	"github.com/duke-git/lancet/v2/netutil"
+	"go.uber.org/atomic"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -32,7 +36,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -102,10 +105,14 @@ type Handler struct {
 	authRequired    bool
 	authCredentials [][]byte // slice with base64-encoded credentials
 
-	trafficStatisticsChannel chan userData
+	UserData map[string]*userData
 
 	AuthUser        map[string]string `json:"auth_user,omitempty"`
 	userCredentials map[string]string
+
+	EnableStatistics bool
+
+	DataPath string `json:"data_path,omitempty"`
 }
 
 // CaddyModule returns the Caddy module information.
@@ -119,37 +126,7 @@ func (Handler) CaddyModule() caddy.ModuleInfo {
 // Provision ensures that h is set up properly before use.
 func (h *Handler) Provision(ctx caddy.Context) error {
 	h.logger = ctx.Logger(h)
-	h.trafficStatisticsChannel = make(chan userData, 100)
-	executable, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	h.logger.Info("executable:" + executable)
-	path := filepath.Dir(executable)
-	dir := path + "/traffic"
-	h.logger.Info("executable path:" + path)
-	_, err = os.Stat(dir)
-	if err != nil && os.IsNotExist(err) {
-		if err = os.MkdirAll(dir, 0755); err != nil {
-			return err
-		}
-	}
-	go func() {
-		for ud := range h.trafficStatisticsChannel {
-			file, err := os.OpenFile(dir+"/"+ud.userName, os.O_RDWR|os.O_CREATE, 0755)
-			if err != nil {
-				continue
-			}
-			buf := make([]byte, 4096)
-			length, _ := file.Read(buf)
-			var traffic int64 = 0
-			if length != 0 {
-				traffic, _ = strconv.ParseInt(string(buf[0:length]), 10, 64)
-			}
-			_ = os.WriteFile(file.Name(), []byte(strconv.FormatInt(traffic+ud.traffic, 10)), 0755)
-			_ = file.Close()
-		}
-	}()
+	h.loadUserData()
 	if h.DialTimeout <= 0 {
 		h.DialTimeout = caddy.Duration(30 * time.Second)
 	}
@@ -207,7 +184,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	h.aclRules = append(h.aclRules, &aclAllRule{allow: true})
 
 	if h.ProbeResistance != nil {
-		if !h.authRequired {
+		if len(h.ProbeResistance.Domain) > 0 && !h.authRequired {
 			return fmt.Errorf("probe resistance requires authentication")
 		}
 		if len(h.ProbeResistance.Domain) > 0 {
@@ -313,7 +290,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		w.Header().Set("Proxy-Authenticate", "Basic realm=\"Caddy Secure Web Proxy\"")
 		return caddyhttp.Error(http.StatusProxyAuthRequired, authErr)
 	}
-
+	h.UserData[user].Ip = netutil.GetRequestPublicIp(r)
 	if r.ProtoMajor != 1 && r.ProtoMajor != 2 && r.ProtoMajor != 3 {
 		return caddyhttp.Error(http.StatusHTTPVersionNotSupported,
 			fmt.Errorf("unsupported HTTP major version: %d", r.ProtoMajor))
@@ -682,13 +659,8 @@ func dualStream(h *Handler, user string, target net.Conn, clientReader io.ReadCl
 		// copy bytes from r to w
 		buf := bufferPool.Get().([]byte)
 		buf = buf[0:cap(buf)]
-		written, _err := flushingIoCopy(w, r, buf, paddingType)
+		_, _err := flushingIoCopy(w, r, buf, paddingType, h, user)
 		bufferPool.Put(buf)
-		if user != "" && paddingType != RemovePadding {
-			go func() {
-				h.trafficStatisticsChannel <- userData{userName: user, traffic: written}
-			}()
-		}
 		if cw, ok := w.(closeWriter); ok {
 			cw.CloseWrite()
 		}
@@ -710,7 +682,7 @@ type closeWriter interface {
 // flushingIoCopy is analogous to buffering io.Copy(), but also attempts to flush on each iteration.
 // If dst does not implement http.Flusher(e.g. net.TCPConn), it will do a simple io.CopyBuffer().
 // Reasoning: http2ResponseWriter will not flush on its own, so we have to do it manually.
-func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int) (written int64, err error) {
+func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int, h *Handler, user string) (written int64, err error) {
 	flusher, hasFlusher := dst.(http.Flusher)
 	var numPadding int
 	for {
@@ -752,6 +724,9 @@ func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int) (
 			}
 			if nw > 0 {
 				written += int64(nw)
+				if h.EnableStatistics && paddingType == RemovePadding {
+					h.UserData[user].Traffic.Add(int64(nw))
+				}
 			}
 			if ew != nil {
 				err = ew
@@ -868,6 +843,72 @@ var (
 )
 
 type userData struct {
-	userName string
-	traffic  int64
+	Traffic *atomic.Int64 `json:"traffic"`
+	Ip      string        `json:"ip"`
+}
+
+func (h *Handler) loadUserData() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("recover", r)
+		}
+	}()
+	if h.DataPath == "" {
+		h.logger.Warn("Data file path not set")
+		return
+	}
+	if !fileutil.IsExist(h.DataPath) && !fileutil.CreateFile(h.DataPath) {
+		h.logger.Error("Data file creation failed")
+		return
+	}
+	toString, err := fileutil.ReadFileToString(h.DataPath)
+	if err != nil {
+		h.logger.Error("Data file read failed")
+		return
+	}
+	userDataIns := map[string]userData{}
+	if toString != "" {
+		if err = sonic.Unmarshal([]byte(toString), &userDataIns); err != nil {
+			h.logger.Error("Data file content parsing failed")
+			return
+		}
+	}
+	h.UserData = map[string]*userData{}
+	fmt.Println(userDataIns)
+	for username := range h.AuthUser {
+		h.UserData[username] = &userData{}
+		if v, ok := userDataIns[username]; ok {
+			fmt.Println("ok", ok, v)
+			if v.Traffic != nil {
+				h.UserData[username].Traffic.Store(v.Traffic.Load())
+			}
+			h.UserData[username].Ip = v.Ip
+		}
+	}
+	h.EnableStatistics = true
+	//go h.statistics()
+}
+
+func (h *Handler) Cleanup() error {
+	fmt.Println("模块退出")
+	return nil
+}
+
+func (h *Handler) statistics() {
+	for {
+		time.Sleep(time.Second * 10)
+		fmt.Println("统计写入")
+		if h.EnableStatistics {
+			marshalString, err := sonic.Marshal(&h.UserData)
+			if err != nil {
+				h.logger.Error("sonic.Marshal :" + err.Error())
+				continue
+			}
+			err = os.WriteFile(h.DataPath, marshalString, 0755)
+			if err != nil {
+				h.logger.Error("statistics os.WriteFile :" + err.Error())
+				continue
+			}
+		}
+	}
 }
