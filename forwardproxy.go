@@ -113,6 +113,9 @@ type Handler struct {
 	EnableStatistics bool
 
 	DataPath string `json:"data_path,omitempty"`
+
+	Ctx    context.Context
+	Cancel context.CancelFunc
 }
 
 // CaddyModule returns the Caddy module information.
@@ -125,6 +128,7 @@ func (Handler) CaddyModule() caddy.ModuleInfo {
 
 // Provision ensures that h is set up properly before use.
 func (h *Handler) Provision(ctx caddy.Context) error {
+	h.Ctx, h.Cancel = context.WithCancel(context.Background())
 	h.logger = ctx.Logger(h)
 	h.loadUserData()
 	if h.DialTimeout <= 0 {
@@ -874,11 +878,9 @@ func (h *Handler) loadUserData() {
 		}
 	}
 	h.UserData = map[string]*userData{}
-	fmt.Println(userDataIns)
 	for username := range h.AuthUser {
 		h.UserData[username] = &userData{}
 		if v, ok := userDataIns[username]; ok {
-			fmt.Println("ok", ok, v)
 			if v.Traffic != nil {
 				h.UserData[username].Traffic.Store(v.Traffic.Load())
 			}
@@ -886,29 +888,36 @@ func (h *Handler) loadUserData() {
 		}
 	}
 	h.EnableStatistics = true
-	//go h.statistics()
+	go h.statistics()
 }
 
 func (h *Handler) Cleanup() error {
-	fmt.Println("模块退出")
+	h.Cancel()
 	return nil
 }
 
 func (h *Handler) statistics() {
+	timeTicker := time.NewTicker(time.Second * 3)
 	for {
-		time.Sleep(time.Second * 10)
-		fmt.Println("统计写入")
-		if h.EnableStatistics {
-			marshalString, err := sonic.Marshal(&h.UserData)
-			if err != nil {
-				h.logger.Error("sonic.Marshal :" + err.Error())
-				continue
+		select {
+		case <-h.Ctx.Done():
+			timeTicker.Stop()
+			return
+		case <-timeTicker.C:
+			timeTicker.Stop()
+			if h.EnableStatistics {
+				marshalString, err := sonic.Marshal(&h.UserData)
+				if err != nil {
+					h.logger.Error("sonic.Marshal :" + err.Error())
+					continue
+				}
+				err = os.WriteFile(h.DataPath, marshalString, 0755)
+				if err != nil {
+					h.logger.Error("statistics os.WriteFile :" + err.Error())
+					continue
+				}
 			}
-			err = os.WriteFile(h.DataPath, marshalString, 0755)
-			if err != nil {
-				h.logger.Error("statistics os.WriteFile :" + err.Error())
-				continue
-			}
+			timeTicker.Reset(time.Second * 3)
 		}
 	}
 }
