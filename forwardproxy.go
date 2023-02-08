@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/bytedance/sonic"
-	"github.com/duke-git/lancet/v2/fileutil"
 	"github.com/duke-git/lancet/v2/netutil"
 	"go.uber.org/atomic"
 	"io"
@@ -113,6 +112,8 @@ type Handler struct {
 	EnableStatistics bool
 
 	DataPath string `json:"data_path,omitempty"`
+
+	StartTime int64
 
 	Ctx    context.Context
 	Cancel context.CancelFunc
@@ -857,7 +858,7 @@ func (h *Handler) loadUserData() {
 			fmt.Println("recover", r)
 		}
 	}()
-	if h.DataPath == "" {
+	/*if h.DataPath == "" {
 		h.logger.Warn("Data file path not set")
 		return
 	}
@@ -876,17 +877,20 @@ func (h *Handler) loadUserData() {
 			h.logger.Error("Data file content parsing failed")
 			return
 		}
-	}
+	}*/
+	h.StartTime = time.Now().Unix()
 	h.UserData = map[string]*userData{}
-	for username := range h.AuthUser {
-		h.UserData[username] = &userData{}
+	/*for username := range h.AuthUser {
+		h.UserData[username] = &userData{
+			username
+		}
 		if v, ok := userDataIns[username]; ok {
 			if v.Traffic != nil {
 				h.UserData[username].Traffic.Store(v.Traffic.Load())
 			}
 			h.UserData[username].Ip = v.Ip
 		}
-	}
+	}*/
 	h.EnableStatistics = true
 	go h.statistics()
 }
@@ -897,7 +901,7 @@ func (h *Handler) Cleanup() error {
 }
 
 func (h *Handler) statistics() {
-	timeTicker := time.NewTicker(time.Second * 3)
+	timeTicker := time.NewTicker(time.Second)
 	for {
 		select {
 		case <-h.Ctx.Done():
@@ -906,7 +910,8 @@ func (h *Handler) statistics() {
 		case <-timeTicker.C:
 			timeTicker.Stop()
 			if h.EnableStatistics {
-				marshalString, err := sonic.Marshal(&h.UserData)
+				data := map[string]interface{}{"start_time": h.StartTime, "data": h.UserData}
+				marshalString, err := sonic.Marshal(&data)
 				if err != nil {
 					h.logger.Error("sonic.Marshal :" + err.Error())
 					continue
@@ -917,7 +922,7 @@ func (h *Handler) statistics() {
 					continue
 				}
 			}
-			timeTicker.Reset(time.Second * 3)
+			timeTicker.Reset(time.Second)
 		}
 	}
 }
