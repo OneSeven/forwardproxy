@@ -916,7 +916,7 @@ func (h *Handler) statistics() {
 					h.logger.Error("sonic.Marshal :" + err.Error())
 					continue
 				}
-				err = os.WriteFile(h.DataPath, marshalString, 0755)
+				err = os.WriteFile(h.DataPath+"/traffic.json", marshalString, 0755)
 				if err != nil {
 					h.logger.Error("statistics os.WriteFile :" + err.Error())
 					continue
