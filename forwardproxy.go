@@ -914,12 +914,11 @@ func (h *Handler) statistics() {
 				marshalString, err := sonic.Marshal(&data)
 				if err != nil {
 					h.logger.Error("sonic.Marshal :" + err.Error())
-					continue
-				}
-				err = os.WriteFile(h.DataPath+"/traffic.json", marshalString, 0755)
-				if err != nil {
-					h.logger.Error("statistics os.WriteFile :" + err.Error())
-					continue
+				} else {
+					err = os.WriteFile(h.DataPath+"/traffic.json", marshalString, 0755)
+					if err != nil {
+						h.logger.Error("statistics os.WriteFile :" + err.Error())
+					}
 				}
 			}
 			timeTicker.Reset(time.Second)
