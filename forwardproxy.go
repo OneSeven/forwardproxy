@@ -915,7 +915,12 @@ func (h *Handler) statistics() {
 				if err != nil {
 					h.logger.Error("sonic.Marshal :" + err.Error())
 				} else {
-					err = os.WriteFile(h.DataPath+"/traffic.json", marshalString, 0755)
+					dir := h.DataPath
+					if after, ok := strings.CutPrefix(h.DataPath, "~"); ok {
+						homeDir, _ := os.UserHomeDir()
+						dir = homeDir + after
+					}
+					err = os.WriteFile(dir+"/traffic.json", marshalString, 0755)
 					if err != nil {
 						h.logger.Error("statistics os.WriteFile :" + err.Error())
 					}

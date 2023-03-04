@@ -99,8 +99,6 @@ github.com/boombuler/barcode v1.0.0/go.mod h1:paBWMcWSl3LHKBqUq+rly7CNSldXjb2rDl
 github.com/bradfitz/go-smtpd v0.0.0-20170404230938-deb6d6237625/go.mod h1:HYsPBTaaSFSlLx/70C2HPIMNZpVV8+vt/A+FMnYP11g=
 github.com/buger/jsonparser v0.0.0-20181115193947-bf1c66bbce23/go.mod h1:bbYlZJ7hK1yFx9hf58LP0zeX7UjIGs20ufpu3evjr+s=
 github.com/bytedance/sonic v1.5.0/go.mod h1:ED5hyg4y6t3/9Ku1R6dU/4KyJ48DZ4jPhfY1O2AihPM=
-github.com/bytedance/sonic v1.7.0 h1:P7DyGrkLbVDzcuqagPsSFnAwwljjhmB3qVF5wzmHOxE=
-github.com/bytedance/sonic v1.7.0/go.mod h1:i736AoUSYt75HyZLoJW9ERYxcy6eaN6h4BZXU064P/U=
 github.com/bytedance/sonic v1.8.1 h1:NqAHCaGaTzro0xMmnTCLUyRlbEP6r8MCA1cJUrH3Pu4=
 github.com/bytedance/sonic v1.8.1/go.mod h1:i736AoUSYt75HyZLoJW9ERYxcy6eaN6h4BZXU064P/U=
 github.com/caddyserver/caddy/v2 v2.4.0-beta.1 h1:Ed/tIaN3p6z8M3pEiXWJL/T8JmCqV62FrSJCHKquW/I=
