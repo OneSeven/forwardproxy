@@ -858,39 +858,8 @@ func (h *Handler) loadUserData() {
 			fmt.Println("recover", r)
 		}
 	}()
-	/*if h.DataPath == "" {
-		h.logger.Warn("Data file path not set")
-		return
-	}
-	if !fileutil.IsExist(h.DataPath) && !fileutil.CreateFile(h.DataPath) {
-		h.logger.Error("Data file creation failed")
-		return
-	}
-	toString, err := fileutil.ReadFileToString(h.DataPath)
-	if err != nil {
-		h.logger.Error("Data file read failed")
-		return
-	}
-	userDataIns := map[string]userData{}
-	if toString != "" {
-		if err = sonic.Unmarshal([]byte(toString), &userDataIns); err != nil {
-			h.logger.Error("Data file content parsing failed")
-			return
-		}
-	}*/
 	h.StartTime = time.Now().Unix()
 	h.UserData = map[string]*userData{}
-	/*for username := range h.AuthUser {
-		h.UserData[username] = &userData{
-			username
-		}
-		if v, ok := userDataIns[username]; ok {
-			if v.Traffic != nil {
-				h.UserData[username].Traffic.Store(v.Traffic.Load())
-			}
-			h.UserData[username].Ip = v.Ip
-		}
-	}*/
 	h.EnableStatistics = true
 	go h.statistics()
 }
