@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/bytedance/sonic"
-	"github.com/duke-git/lancet/v2/netutil"
 	"go.uber.org/atomic"
 	"io"
 	"io/ioutil"
@@ -295,7 +294,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		w.Header().Set("Proxy-Authenticate", "Basic realm=\"Caddy Secure Web Proxy\"")
 		return caddyhttp.Error(http.StatusProxyAuthRequired, authErr)
 	}
-	h.UserData[user].Ip = netutil.GetRequestPublicIp(r)
+	//h.UserData[user].Ip = netutil.GetRequestPublicIp(r)
 	if r.ProtoMajor != 1 && r.ProtoMajor != 2 && r.ProtoMajor != 3 {
 		return caddyhttp.Error(http.StatusHTTPVersionNotSupported,
 			fmt.Errorf("unsupported HTTP major version: %d", r.ProtoMajor))
