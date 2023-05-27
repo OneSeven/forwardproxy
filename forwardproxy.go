@@ -25,7 +25,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"github.com/bytedance/sonic"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/atomic"
 	"io"
 	"io/ioutil"
@@ -109,13 +109,6 @@ type Handler struct {
 	userCredentials map[string]string
 
 	EnableStatistics bool
-
-	DataPath string `json:"data_path,omitempty"`
-
-	StartTime int64
-
-	Ctx    context.Context
-	Cancel context.CancelFunc
 }
 
 // CaddyModule returns the Caddy module information.
@@ -128,7 +121,6 @@ func (Handler) CaddyModule() caddy.ModuleInfo {
 
 // Provision ensures that h is set up properly before use.
 func (h *Handler) Provision(ctx caddy.Context) error {
-	h.Ctx, h.Cancel = context.WithCancel(context.Background())
 	h.logger = ctx.Logger(h)
 	h.loadUserData()
 	if h.DialTimeout <= 0 {
@@ -729,8 +721,11 @@ func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int, h
 			}
 			if nw > 0 {
 				written += int64(nw)
-				if h.EnableStatistics && paddingType == RemovePadding {
-					h.UserData[user].Traffic.Add(int64(nw))
+				if h.EnableStatistics && rdb != nil && paddingType == RemovePadding {
+					//h.UserData[user].Traffic.Add(int64(nw))
+					ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+					rdb.ZIncrBy(ctx, "traffic", float64(nw), user)
+					cancel()
 				}
 			}
 			if ew != nil {
@@ -856,51 +851,19 @@ type user struct {
 	Password string `json:"password"`
 }
 
+var rdb *redis.Client
+
 func (h *Handler) loadUserData() {
 	defer func() {
 		if r := recover(); r != nil {
 			h.logger.Error("loadUserData err:" + r.(error).Error())
 		}
 	}()
-	h.StartTime = time.Now().Unix()
 	h.UserData = map[string]*userData{}
 	h.EnableStatistics = true
-	go h.statistics()
-}
-
-func (h *Handler) Cleanup() error {
-	h.Cancel()
-	return nil
-}
-
-func (h *Handler) statistics() {
-	timeTicker := time.NewTicker(time.Second)
-	for {
-		select {
-		case <-h.Ctx.Done():
-			timeTicker.Stop()
-			return
-		case <-timeTicker.C:
-			timeTicker.Stop()
-			if h.EnableStatistics {
-				data := map[string]interface{}{"start_time": h.StartTime, "data": h.UserData}
-				marshalString, err := sonic.Marshal(&data)
-				if err != nil {
-					h.logger.Error("sonic.Marshal :" + err.Error())
-				} else {
-					dir := h.DataPath
-					if after, ok := strings.CutPrefix(h.DataPath, "~"); ok {
-						homeDir, _ := os.UserHomeDir()
-						dir = homeDir + after
-					}
-					err = os.WriteFile(dir+"/traffic.json", marshalString, 0755)
-					if err != nil {
-
-						h.logger.Error("statistics os.WriteFile :" + err.Error())
-					}
-				}
-			}
-			timeTicker.Reset(time.Second)
-		}
-	}
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
 }
