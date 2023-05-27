@@ -105,7 +105,7 @@ type Handler struct {
 
 	UserData map[string]*userData
 
-	AuthUser        map[string]string `json:"auth_user,omitempty"`
+	AuthUser        []user `json:"auth_user,omitempty"`
 	userCredentials map[string]string
 
 	EnableStatistics bool
@@ -153,12 +153,12 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	if len(h.AuthUser) != 0 {
 		h.authRequired = true
 		h.userCredentials = make(map[string]string, len(h.AuthUser))
-		for user, pass := range h.AuthUser {
-			basicAuthBuf := make([]byte, base64.StdEncoding.EncodedLen(len(user)+1+len(pass)))
-			base64.StdEncoding.Encode(basicAuthBuf, []byte(user+":"+pass))
+		for _, v := range h.AuthUser {
+			basicAuthBuf := make([]byte, base64.StdEncoding.EncodedLen(len(v.Username)+1+len(v.Password)))
+			base64.StdEncoding.Encode(basicAuthBuf, []byte(v.Username+":"+v.Password))
 			h.authCredentials = append(h.authCredentials, basicAuthBuf)
-			h.userCredentials[string(basicAuthBuf)] = user
-			h.UserData[user] = &userData{}
+			h.userCredentials[string(basicAuthBuf)] = v.Username
+			h.UserData[v.Username] = &userData{}
 		}
 	}
 
@@ -851,6 +851,10 @@ type userData struct {
 	Traffic atomic.Int64 `json:"traffic"`
 	Ip      string       `json:"ip"`
 }
+type user struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
 
 func (h *Handler) loadUserData() {
 	defer func() {
@@ -891,6 +895,7 @@ func (h *Handler) statistics() {
 					}
 					err = os.WriteFile(dir+"/traffic.json", marshalString, 0755)
 					if err != nil {
+
 						h.logger.Error("statistics os.WriteFile :" + err.Error())
 					}
 				}
