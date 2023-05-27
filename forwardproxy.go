@@ -103,7 +103,7 @@ type Handler struct {
 	authRequired    bool
 	authCredentials [][]byte // slice with base64-encoded credentials
 
-	UserData map[string]*userData
+	UserData map[string]userData
 
 	AuthUser        map[string]string `json:"auth_user,omitempty"`
 	userCredentials map[string]string
@@ -854,11 +854,11 @@ type userData struct {
 func (h *Handler) loadUserData() {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Println("recover", r)
+			h.logger.Error("loadUserData err:" + r.(error).Error())
 		}
 	}()
 	h.StartTime = time.Now().Unix()
-	h.UserData = map[string]*userData{}
+	h.UserData = map[string]userData{}
 	h.EnableStatistics = true
 	go h.statistics()
 }
