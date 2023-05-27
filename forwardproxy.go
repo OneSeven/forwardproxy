@@ -727,7 +727,7 @@ func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int, h
 					/*ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
 					rdb.ZIncrBy(ctx, "traffic", float64(nw), user)
 					cancel()*/
-					h.traffic <- userData{Username: user, Traffic: int64(nw)}
+					//h.traffic <- userData{Username: user, Traffic: int64(nw)}
 				}
 			}
 			if ew != nil {
@@ -870,7 +870,7 @@ func (h *Handler) loadUserData() {
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
-	go h.trafficHandler()
+	//go h.trafficHandler()
 }
 
 func (h *Handler) Cleanup() error {
