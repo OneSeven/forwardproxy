@@ -103,7 +103,7 @@ type Handler struct {
 	authRequired    bool
 	authCredentials [][]byte // slice with base64-encoded credentials
 
-	UserData map[string]userData
+	UserData map[string]*userData
 
 	AuthUser        map[string]string `json:"auth_user,omitempty"`
 	userCredentials map[string]string
@@ -158,6 +158,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 			base64.StdEncoding.Encode(basicAuthBuf, []byte(user+":"+pass))
 			h.authCredentials = append(h.authCredentials, basicAuthBuf)
 			h.userCredentials[string(basicAuthBuf)] = user
+			h.UserData[user] = &userData{}
 		}
 	}
 
@@ -847,8 +848,8 @@ var (
 )
 
 type userData struct {
-	Traffic *atomic.Int64 `json:"traffic"`
-	Ip      string        `json:"ip"`
+	Traffic atomic.Int64 `json:"traffic"`
+	Ip      string       `json:"ip"`
 }
 
 func (h *Handler) loadUserData() {
@@ -858,7 +859,7 @@ func (h *Handler) loadUserData() {
 		}
 	}()
 	h.StartTime = time.Now().Unix()
-	h.UserData = map[string]userData{}
+	h.UserData = map[string]*userData{}
 	h.EnableStatistics = true
 	go h.statistics()
 }
