@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/redis/go-redis/v9"
-	"go.uber.org/atomic"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -103,12 +102,15 @@ type Handler struct {
 	authRequired    bool
 	authCredentials [][]byte // slice with base64-encoded credentials
 
-	UserData map[string]*userData
-
 	AuthUser        []user `json:"auth_user,omitempty"`
 	userCredentials map[string]string
 
 	EnableStatistics bool
+
+	traffic chan userData
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // CaddyModule returns the Caddy module information.
@@ -150,7 +152,6 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 			base64.StdEncoding.Encode(basicAuthBuf, []byte(v.Username+":"+v.Password))
 			h.authCredentials = append(h.authCredentials, basicAuthBuf)
 			h.userCredentials[string(basicAuthBuf)] = v.Username
-			h.UserData[v.Username] = &userData{}
 		}
 	}
 
@@ -723,9 +724,10 @@ func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int, h
 				written += int64(nw)
 				if h.EnableStatistics && rdb != nil && paddingType == RemovePadding {
 					//h.UserData[user].Traffic.Add(int64(nw))
-					ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+					/*ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
 					rdb.ZIncrBy(ctx, "traffic", float64(nw), user)
-					cancel()
+					cancel()*/
+					h.traffic <- userData{Username: user, Traffic: int64(nw)}
 				}
 			}
 			if ew != nil {
@@ -843,8 +845,9 @@ var (
 )
 
 type userData struct {
-	Traffic atomic.Int64 `json:"traffic"`
-	Ip      string       `json:"ip"`
+	Username string `json:"username"`
+	Traffic  int64  `json:"traffic"`
+	Ip       string `json:"ip"`
 }
 type user struct {
 	Username string `json:"username"`
@@ -859,11 +862,31 @@ func (h *Handler) loadUserData() {
 			h.logger.Error("loadUserData err:" + r.(error).Error())
 		}
 	}()
-	h.UserData = map[string]*userData{}
+	h.ctx, h.cancel = context.WithCancel(context.TODO())
 	h.EnableStatistics = true
+	h.traffic = make(chan userData, 10000)
 	rdb = redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
+	go h.trafficHandler()
+}
+
+func (h *Handler) Cleanup() error {
+	h.cancel()
+	return nil
+}
+
+func (h *Handler) trafficHandler() {
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+		case item := <-h.traffic:
+			ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+			rdb.ZIncrBy(ctx, "traffic", float64(item.Traffic), item.Username)
+			cancel()
+		}
+	}
 }
