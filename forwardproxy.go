@@ -663,7 +663,7 @@ func dualStream(h *Handler, user string, target net.Conn, clientReader io.ReadCl
 		buf := bufferPool.Get().([]byte)
 		buf = buf[0:cap(buf)]
 		written, _err := flushingIoCopy(w, r, buf, paddingType, h, user)
-		if h.EnableStatistics && rdb != nil && paddingType == AddPadding {
+		if h.EnableStatistics && rdb != nil {
 			//h.UserData[user].Traffic.Add(int64(nw))
 			/*ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
 			rdb.ZIncrBy(ctx, "traffic", float64(nw), user)
