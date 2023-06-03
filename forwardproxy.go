@@ -876,7 +876,7 @@ func (h *Handler) loadUserData() {
 		DB:       0,  // use default DB
 	})
 	go h.SyncUser()
-	//go h.trafficHandler()
+	go h.trafficHandler()
 }
 
 func (h *Handler) Cleanup() error {
