@@ -456,7 +456,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	return forwardResponse(w, response)
 }
 
-func (h Handler) checkCredentials(r *http.Request) (user string, error error) {
+func (h *Handler) checkCredentials(r *http.Request) (user string, error error) {
 	pa := strings.Split(r.Header.Get("Proxy-Authorization"), " ")
 	if len(pa) != 2 {
 		return "", errors.New("Proxy-Authorization is required! Expected format: <type> <credentials>")
