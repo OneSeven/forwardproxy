@@ -662,7 +662,14 @@ func dualStream(h *Handler, user string, target net.Conn, clientReader io.ReadCl
 		// copy bytes from r to w
 		buf := bufferPool.Get().([]byte)
 		buf = buf[0:cap(buf)]
-		_, _err := flushingIoCopy(w, r, buf, paddingType, h, user)
+		written, _err := flushingIoCopy(w, r, buf, paddingType, h, user)
+		if h.EnableStatistics && rdb != nil && paddingType == AddPadding {
+			//h.UserData[user].Traffic.Add(int64(nw))
+			/*ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+			rdb.ZIncrBy(ctx, "traffic", float64(nw), user)
+			cancel()*/
+			h.traffic <- userData{Username: user, Traffic: written}
+		}
 		bufferPool.Put(buf)
 		if cw, ok := w.(closeWriter); ok {
 			cw.CloseWrite()
@@ -727,13 +734,6 @@ func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int, h
 			}
 			if nw > 0 {
 				written += int64(nw)
-				if h.EnableStatistics && rdb != nil && paddingType == AddPadding {
-					//h.UserData[user].Traffic.Add(int64(nw))
-					/*ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
-					rdb.ZIncrBy(ctx, "traffic", float64(nw), user)
-					cancel()*/
-					h.traffic <- userData{Username: user, Traffic: int64(nw)}
-				}
 			}
 			if ew != nil {
 				err = ew
