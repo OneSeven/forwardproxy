@@ -914,7 +914,6 @@ func (h *Handler) SyncUser() {
 			h.userCredentials[string(basicAuthBuf)] = v.Username
 		}
 		h.mutex.Unlock()
-		return
 	}
 }
 
