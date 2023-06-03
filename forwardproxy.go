@@ -875,6 +875,7 @@ func (h *Handler) loadUserData() {
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
+	go h.SyncUser()
 	go h.trafficHandler()
 }
 
