@@ -727,7 +727,7 @@ func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int, h
 			}
 			if nw > 0 {
 				written += int64(nw)
-				if h.EnableStatistics && rdb != nil && paddingType == RemovePadding {
+				if h.EnableStatistics && rdb != nil && paddingType == AddPadding {
 					//h.UserData[user].Traffic.Add(int64(nw))
 					/*ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
 					rdb.ZIncrBy(ctx, "traffic", float64(nw), user)
