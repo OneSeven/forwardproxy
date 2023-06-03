@@ -146,7 +146,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 		h.authRequired = true
 		h.authCredentials = [][]byte{basicAuthBuf}
 	}
-
+	h.authRequired = true
 	/*	if len(h.AuthUser) != 0 {
 		h.authRequired = true
 		h.userCredentials = make(map[string]string, len(h.AuthUser))
