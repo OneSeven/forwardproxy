@@ -23,6 +23,7 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/redis/go-redis/v9"
@@ -102,7 +103,7 @@ type Handler struct {
 	authRequired    bool
 	authCredentials [][]byte // slice with base64-encoded credentials
 
-	AuthUser        []user `json:"auth_user,omitempty"`
+	//AuthUser        []user `json:"auth_user,omitempty"`
 	userCredentials map[string]string
 
 	EnableStatistics bool
@@ -111,6 +112,8 @@ type Handler struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	mutex sync.RWMutex
 }
 
 // CaddyModule returns the Caddy module information.
@@ -144,7 +147,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 		h.authCredentials = [][]byte{basicAuthBuf}
 	}
 
-	if len(h.AuthUser) != 0 {
+	/*	if len(h.AuthUser) != 0 {
 		h.authRequired = true
 		h.userCredentials = make(map[string]string, len(h.AuthUser))
 		for _, v := range h.AuthUser {
@@ -153,7 +156,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 			h.authCredentials = append(h.authCredentials, basicAuthBuf)
 			h.userCredentials[string(basicAuthBuf)] = v.Username
 		}
-	}
+	}*/
 
 	// access control lists
 	for _, rule := range h.ACL {
@@ -461,6 +464,8 @@ func (h Handler) checkCredentials(r *http.Request) (user string, error error) {
 	if strings.ToLower(pa[0]) != "basic" {
 		return "", errors.New("Auth type is not supported")
 	}
+	h.mutex.RLock()
+	defer h.mutex.RUnlock()
 	for _, creds := range h.authCredentials {
 		if subtle.ConstantTimeCompare(creds, []byte(pa[1])) == 1 {
 			// Please do not consider this to be timing-attack-safe code. Simple equality is almost
@@ -875,7 +880,40 @@ func (h *Handler) loadUserData() {
 
 func (h *Handler) Cleanup() error {
 	h.cancel()
+	_ = rdb.Close()
 	return nil
+}
+
+func (h *Handler) SyncUser() {
+	for {
+		result, err := rdb.BLPop(h.ctx, 0, "users").Result()
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			} else {
+				time.Sleep(time.Second * 10)
+			}
+		}
+		var authUser []user
+		if len(result) < 2 {
+			continue
+		}
+		err = json.Unmarshal([]byte(result[1]), &authUser)
+		if err != nil {
+			continue
+		}
+		h.mutex.Lock()
+		h.authRequired = true
+		h.userCredentials = make(map[string]string, len(authUser))
+		h.authCredentials = [][]byte{}
+		for _, v := range authUser {
+			basicAuthBuf := make([]byte, base64.StdEncoding.EncodedLen(len(v.Username)+1+len(v.Password)))
+			base64.StdEncoding.Encode(basicAuthBuf, []byte(v.Username+":"+v.Password))
+			h.authCredentials = append(h.authCredentials, basicAuthBuf)
+			h.userCredentials[string(basicAuthBuf)] = v.Username
+		}
+		h.mutex.Unlock()
+	}
 }
 
 func (h *Handler) trafficHandler() {
