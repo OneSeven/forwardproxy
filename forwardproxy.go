@@ -729,10 +729,10 @@ func flushingIoCopy(dst io.Writer, src io.Reader, buf []byte, paddingType int, h
 				written += int64(nw)
 				if h.EnableStatistics && rdb != nil && paddingType == RemovePadding {
 					//h.UserData[user].Traffic.Add(int64(nw))
-					ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+					/*ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
 					rdb.ZIncrBy(ctx, "traffic", float64(nw), user)
-					cancel()
-					//h.traffic <- userData{Username: user, Traffic: int64(nw)}
+					cancel()*/
+					h.traffic <- userData{Username: user, Traffic: int64(nw)}
 				}
 			}
 			if ew != nil {
@@ -914,6 +914,7 @@ func (h *Handler) SyncUser() {
 			h.userCredentials[string(basicAuthBuf)] = v.Username
 		}
 		h.mutex.Unlock()
+		return
 	}
 }
 
