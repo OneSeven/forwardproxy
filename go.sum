@@ -628,6 +628,8 @@ github.com/russross/blackfriday/v2 v2.0.1 h1:lPqVAte+HuHNfhJ/0LC98ESWRz8afy9tM/0
 github.com/russross/blackfriday/v2 v2.0.1/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/ryanuber/columnize v0.0.0-20160712163229-9b3edd62028f/go.mod h1:sm1tb6uqfes/u+d4ooFouqFdy9/2g9QGwK3SQygK0Ts=
 github.com/ryanuber/go-glob v0.0.0-20170128012129-256dc444b735/go.mod h1:807d1WSdnB0XRJzKNil9Om6lcp/3a0v4qIHxIXzX/Yc=
+github.com/sagernet/sing v0.2.7 h1:cOy0FfPS8q7m0aJ51wS7LRQAGc9wF+fWhHtBDj99wy8=
+github.com/sagernet/sing v0.2.7/go.mod h1:Ta8nHnDLAwqySzKhGoKk4ZIB+vJ3GTKj7UPrWYvM+4w=
 github.com/samfoo/ansi v0.0.0-20160124022901-b6bd2ded7189 h1:CmSpbxmewNQbzqztaY0bke1qzHhyNyC29wYgh17Gxfo=
 github.com/samfoo/ansi v0.0.0-20160124022901-b6bd2ded7189/go.mod h1:UUwuHEJ9zkkPDxspIHOa59PUeSkGFljESGzbxntLmIg=
 github.com/samuel/go-zookeeper v0.0.0-20190923202752-2cc03de413da/go.mod h1:gi+0XIa01GRL2eRQVjQkKGqKF3SF9vZR/HnPullcV2E=

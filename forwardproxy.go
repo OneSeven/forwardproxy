@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/redis/go-redis/v9"
+	"github.com/sagernet/sing/common/uot"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -501,6 +502,19 @@ func (h Handler) dialContextCheckACL(ctx context.Context, network, hostPort stri
 	if err != nil {
 		// return nil, &proxyError{S: err.Error(), Code: http.StatusBadRequest}
 		return nil, caddyhttp.Error(http.StatusBadRequest, err)
+	}
+
+	if host == uot.MagicAddress || host == uot.LegacyMagicAddress {
+		udpConn, err := net.ListenUDP("udp", nil)
+		if err != nil {
+			return nil, err
+		}
+		switch host {
+		case uot.MagicAddress:
+			return uot.NewServerConn(udpConn, uot.Version), nil
+		case uot.LegacyMagicAddress:
+			return uot.NewServerConn(udpConn, uot.LegacyVersion), nil
+		}
 	}
 
 	if h.upstream != nil {
