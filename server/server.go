@@ -75,7 +75,7 @@ func (s *Server) SyncUser(ctx context.Context, list *UserList) (*emptypb.Empty, 
 	for _, user := range list.UserList {
 		auth := string(EncodeAuthCredentials(user.Username, user.Password))
 		if _, ok := s.Users.Load(auth); !ok {
-			s.Users.Store(auth, user)
+			_, _ = s.AddUser(ctx, user)
 		}
 	}
 	s.Users.Range(func(key, value interface{}) bool {
