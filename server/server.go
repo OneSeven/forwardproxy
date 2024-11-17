@@ -6,9 +6,11 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"log"
 	"slices"
 	"sync"
 	"time"
+	_ "time/tzdata"
 )
 
 // EncodeAuthCredentials base64-encode credentials
@@ -28,6 +30,11 @@ type Server struct {
 }
 
 func NewServer() *Server {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		log.Fatalln("时区设置错误：", err.Error(), "Asia/Shanghai")
+	}
+	time.Local = location
 	server := &Server{}
 	server.Connect.Store(false)
 	return server
