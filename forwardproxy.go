@@ -97,6 +97,8 @@ type Handler struct {
 	AuthCredentials [][]byte `json:"auth_credentials,omitempty"` // slice with base64-encoded credentials
 
 	Server *server.Server
+
+	FixedUser map[string]string `json:"fixed_user,omitempty"`
 }
 
 // CaddyModule returns the Caddy module information.
@@ -110,6 +112,14 @@ func (Handler) CaddyModule() caddy.ModuleInfo {
 // Provision ensures that h is set up properly before use.
 func (h *Handler) Provision(ctx caddy.Context) error {
 	svr := server.NewServer()
+	if len(h.FixedUser) > 0 {
+		for k, v := range h.FixedUser {
+			_, _ = svr.AddUser(context.TODO(), &server.User{
+				Username: k,
+				Password: v,
+			})
+		}
+	}
 	h.Server = svr
 	server.GRPCServer(svr)
 	h.logger = ctx.Logger(h)
